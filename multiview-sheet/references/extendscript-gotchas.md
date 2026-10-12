@@ -22,9 +22,23 @@
 
 ## 编码与执行
 
+### Windows（COM）
+
 - JSX 文件含中文时用 UTF-8（带不带 BOM 均可），PowerShell 侧必须 `ReadAllText(path, UTF8)` 后走 COM `app.DoJavaScript(code)`，中文字符经 unicode 变体传递安全。
 - PowerShell 里 `New-Object -ComObject Photoshop.Application` 会自动拉起 PS（冷启动约 10-30s），COM 测试脚本要给足超时（120s+），整表生成给 300-600s。
 - 报错格式为"错误 N: ... 直线: M -> 代码"，N=8800/1320/1243 一类基本都对应上面的枚举/命令坑。
+
+### macOS（AppleScript）
+
+- 执行器 `scripts/run_jsx.sh` → `osascript scripts/run_jsx.applescript <jsx>`，底层是 Photoshop 字典命令 `do javascript`（等价 COM `DoJavaScript`）。已验证 PS 2026 / **27.10.0**、macOS 27.0.1 可用。
+- **必须在文件沙箱外运行**。在 DSH 沙箱内调用时，AppleScript 事件会被 Photoshop 拒绝，报 `Photoshop 报错 (-10004): …發生越權取用的錯誤。 (-2700)`。命令要在 `danger-full-access` 下重跑。
+- **错误文本会丢**：`do javascript` 抛错时经 AppleScript 通道回传的消息一律变成 `?`，只剩数字码（中文、英文都一样）。因此**别依赖 macOS 端的错误消息**，要看行号就得靠下面的包装。
+- 执行器默认把 JSX 包进 `try { … } catch (__e) { "__JSX_THROW__|" + (__e.line-1) + "|" + __e.name + "|" + __e.message }`：运行时错误改走**无损的返回值通道**，能带回真实源文件行号与完整中文消息。语法/编译错误发生在包装生效前，仍是 `8800` + `?`。
+- `__e.line` 是包装后文本里的行号，已按前置的 `try {` 行做 `-1` 修正；改动包装行数时必须同步改这个偏移。
+- 脚本含 `#target` / `#include` 等预处理指令时包装会破坏其"必须位于文件首行"的要求，执行器会自动检测并跳过包装（也可用 `MV_NO_WRAP=1` 强制关闭）。
+- AppleScript 侧显式设了 `with timeout of 1800 seconds`（默认 120s 不够冷启动 + 整表生成）。
+- 返回值通道是 UTF-8 无损的（中文、emoji 均正常），只有错误通道有损——这是包装方案成立的前提。
+- Photoshop 冷启动可由执行器自行完成（实测约 5s，首次全新启动更久）；`PHOTOSHOP_BUNDLE_ID` 可指定 bundle id，默认 `com.adobe.Photoshop`。
 
 ## 布局常量（3840x2160 版式）
 

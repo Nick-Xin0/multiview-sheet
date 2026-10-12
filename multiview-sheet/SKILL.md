@@ -11,7 +11,17 @@ description: 用 Photoshop 脚本把一个主体的多视角图片文件夹排�
 
 ## 前置条件
 
-Windows + Photoshop（COM 接口 `Photoshop.Application`，PS CC 2017 ~ 2026 均可）+ `uv`（用于跑 Pillow 辅助脚本）。
+Photoshop + `uv`（用于跑 Pillow 辅助脚本：素材盘点、预览缩放）。执行器按平台分，**JSX 模板本身跨平台，不用改**：
+
+| 平台 | 执行器 | 要求 |
+|---|---|---|
+| Windows | `scripts/run_jsx.ps1` | Photoshop CC 2017 ~ 2026，COM 接口 `Photoshop.Application` |
+| macOS | `scripts/run_jsx.sh` | Adobe Photoshop（已在 2026 / 27.10 验证），AppleScript `do javascript` |
+
+macOS 额外要求：
+- 执行器**必须在文件沙箱之外运行**（DSH 里即 `danger-full-access`）。沙箱内的 AppleScript 事件会被 Photoshop 拒绝，报 `-10004 / 越權取用`。这是硬性限制，重试沙箱内执行没有意义。
+- 首次调用会弹「允许 … 控制 Adobe Photoshop」的自动化授权，需允许（系统设置 → 隐私与安全性 → 自动化）。
+- 未运行 Photoshop 时执行器会自行冷启动（实测约 5s；首次全新启动更久）。
 
 ## 工作流
 
@@ -32,15 +42,30 @@ uv run --with pillow python "<技能目录>/scripts/inspect_folder.py" "<主体�
 
 复制 `assets/sheet_template.jsx` 到工作目录（如 `<工作区>/_build/make_<主体名>.jsx`），只改文件顶部的 **CONFIG 区**：`SRC`（源图文件夹，正斜杠）、`OUTD`（输出目录，惯例用图片文件夹的**上一级**）、`DOCNAME`、左侧四个视图的文件名与 `TOP_ROT`（+90 顺时针 / -90 逆时针）、右侧 6 格明细。
 
+`SRC`/`OUTD` 用**绝对路径 + 正斜杠**，两个平台都吃（macOS 例：`/Users/me/Desktop/1211/1211/`）。
+
 改 CONFIG 前先读 `references/extendscript-gotchas.md`（这套模板踩过的坑，别绕开模板里的 helper 另起炉灶）。
 
 ### 3. 在 Photoshop 中执行
+
+Windows：
 
 ```bash
 powershell -NoProfile -ExecutionPolicy Bypass -File "<技能目录>/scripts/run_jsx.ps1" "<jsx绝对路径>"
 ```
 
-成功返回 `SHEET_DONE|layers=N`；失败会打印 Photoshop 报错（含行号），按 gotchas 排查。
+macOS：
+
+```bash
+bash "<技能目录>/scripts/run_jsx.sh" "<jsx绝对路径>"
+```
+
+成功返回 `SHEET_DONE|layers=N`；失败返回**非 0 退出码**并打印 `JSX ERROR: <原因>` 后按 gotchas 排查。两个执行器输出格式一致，判读方式相同。
+
+macOS 端的报错能力：
+- **运行时错误**：执行器已内置 `try/catch` 包装，错误改走无损返回值通道，能拿到**真实源文件行号 + 完整中文消息**，例如 `JSX ERROR: ExtendScript 在源文件第 42 行抛出 Error: …`。
+- **语法/编译错误**：发生在包装生效前，只能拿到代码 `8800`，错误文本会被 AppleScript 通道丢成 `?`——先单独核对 JSX 语法。
+- 需要原样执行（脚本含 `#target`/`#include` 等预处理指令）时设 `MV_NO_WRAP=1`，此时会跳过包装、自动退回数字码报错。
 
 ### 4. 预览校验（必做，常需一轮修正）
 
@@ -49,9 +74,11 @@ PNG 约 20MB+，超出部分工具的图片读取限制，先缩小再查：
 ```bash
 uv run --with pillow python -c "
 from PIL import Image
-im = Image.open(r'<输出>\多视图参考表_视频版_3840x2160.png')
-im.convert('RGB').resize((1600,900), Image.LANCZOS).save(r'<输出>\_preview.jpg', quality=88)"
+im = Image.open('<输出>/多视图参考表_视频版_3840x2160.png')
+im.convert('RGB').resize((1600,900), Image.LANCZOS).save('<输出>/_preview.jpg', quality=88)"
 ```
+
+（路径用正斜杠，Windows/macOS 通用；Windows 的 `C:\...` 也写成 `C:/...`。）
 
 用 Read 检查清单：
 - **俯视图车头朝向与侧视图一致**（最容易错的一项，错了就翻转 TOP_ROT 符号重跑）
